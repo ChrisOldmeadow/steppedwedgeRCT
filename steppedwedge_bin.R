@@ -1,115 +1,112 @@
+# Name: sim_power_steppedwedge_bin.R
+# Author: chris Oldmeadow
+# Date: 18/1/2021
+# Summary:  simulate power for a stepped wedge trial with a dichotomous outcome
 
-library(plyr)
-library(lme4)
+
+
+library(plyr) # data functions
+library(lme4) # simulating the data and fitting the mixed models
+library(pbapply)  # progress bar for simulations
 
 
 # using a mixed effects, quick method
-
-
-
-sim_designSWT <-function(n.site ,
+designSWT <-function(n.site ,
                   n.id ,
+                  min.base, # basleine time for first site
                   n.period,
-                  step)     #time between steps, eg every 2 months
-{
+                  step) {    #time between steps, eg every 2 months 
    
-  
-  
- 
-expdat <- expand.grid( id = seq(n.id),time = seq(n.period),site =seq(n.site)) 
+    expdat <- expand.grid( id = seq(n.id),time = seq(n.period),site =seq(n.site)) 
+    sites <- data.frame(site = seq(n.site),
+                        step = seq(from = (min.base+1),
+                                   to = (n.period-(min.base+step)) ,
+                                   by = step))
+    df<-merge(expdat,sites,by="site")
+    df$period <- ifelse(df$time <  df$step,0,
+                        ifelse(df$time < (df$step + step), NA, 1 ))  # period is missing during the intervention period and 1 thereafter
 
-
-sites <- data.frame(site = seq(n.site), step = seq(from = (step), 
-                                                   to = (n.period-1) ,
-                                                   by = step))
-
-
-df<-merge(expdat,sites,by="site")
-
-df$period <- ifelse(df$time <=  df$step,0,
-                    ifelse(df$time <= (df$step + step), NA, 1 ))  # period is missing during the intervention period and 1 thereafter
-
-
-
-df <- na.exclude(df)
-
-  
-  
-  return(df)
- 
-  
+    df <- na.exclude(df)
+    return(df)
 }
 
-simdat <- sim_designSWT(n.site = 3,
-              n.id = 12,
-              n.period = 5,
-              step = 1)
 
-  table(simdat$site,simdat$time)
+simSWRCT <- function(df,
+                     nreps ,
+                     p1 , # prev of outcome at pre intervetion
+                     p2 , # prev of outcome at post intervetion
+                     rho) { # intra-class correlation
+    o2<-p2/(1-p2)
+    o1<- p1/(1-p1)
+
+    beta <- c(log(o2), log(o1/o2))
+    names(beta)<-c("(Intercept)","period")
+
+
+
+    sigma2 <-(pi ^ 2) / 3
+    theta <-sqrt((rho*sigma2)/(1-rho))
+    names(theta)<-c("site.(Intercept)")
+
+    ss <- simulate(~ period  + (1 | site), nsim = nreps, family = binomial, 
+                   newdata = df, newparams = list(theta = theta,   beta = beta))
+
+
+    return(ss)
+}
+
+# fits a linear mixed model to the simulated data
+ 
+fitsim <- function(i,dat = simdat,out = ss) {
+    # dat is the data structure
+    # out is the list of simulated outcomes
+
+    return <- tryCatch({
+        dat$resp <- out[[i]]
+        res<-coef(summary(MASS::glmmPQL(resp ~ period + time , 
+                                        random = ~ 1 |site,
+                                        family = binomial, 
+                                        data=dat,
+                                        verbose = FALSE)))["period", ]
+        names(res)<-c("est","se","df","t","p")
+        return(res)
+    },
+    warning =function(e) {
+        #message(e)  # print error message
+        return(c(est=NA, se=NA, df = NA, t = NA, p=NA))
+    },
+
+    error=function(e) {
+        #message(e)  # print error message
+        return(c(est=NA, se=NA, df = NA, t=NA, p=NA))
+    })
+
+    return(return)
+}
+
+
+# now the power calculations
+
+# 10 completed surveys per site per week = 40 per site per month,
+# 5 months basline, 5 months intervention
+
+simdat <- designSWT(n.site = 5,
+              n.id = 40,
+              min.base = 5,
+              n.period = 36,
+              step = 5)
+
+table(simdat$site,simdat$time)
 table(simdat$site,simdat$period)
  
 
 
-pow_simSWRCT <- function(df,
-                           nreps ,
-                  p1 ,
-                  p2 ,
-                  rho)
-  {
+ss <- simSWRCT(simdat, p1 = .6 ,p2 = .7 , rho = .2,nreps = 1000)
+fitAll <- t(pbsapply(seq(1000), function(i) fitsim(i)))
 
-  
-  o2<-p2/(1-p2)
-  o1<- p1/(1-p1)
-  
-  beta <- c(log(o2), log(o1/o2))
-  names(beta)<-c("(Intercept)","period")
-  
-  
-  
-  sigma2 <-(pi ^ 2) / 3
-  theta <-sqrt((rho*sigma2)/(1-rho))
-  names(theta)<-c("site.(Intercept)")
-  
-  ss <- simulate(~ period  + (1 | site), nsim = nreps, family = binomial, 
-                 newdata = df, newparams = list(theta = theta,   beta = beta))
-  
-  
-  
-  df$resp <- ss[, 1]
-  fit1 <- MASS::glmmPQL(resp ~ period + time , random = ~ 1 | site, family = binomial, data=df, verbose = FALSE)
-  
-  fitsim <- function(i) {
-    df$resp <- ss[, i]
-    return <- tryCatch({
-      res<-coef(summary(MASS::glmmPQL(resp ~ period + time , random = ~ 1 | site, family = binomial, data=df)))["period", ]
-      names(res)<-c("est","se","df","t","p")
-      return(res)
-    },
-    warning =function(e) {
-      #message(e)  # print error message
-      return(c(est=NA, se=NA, df=NA , t=NA, p=NA))
-    },
-    
-    error=function(e) {
-      #message(e)  # print error message
-      return(c(est=NA, se=NA, df=NA , t=NA, p=NA))
-    })
-    
-    return(return)
-  }
-  
-  fitAll <- ldply(seq(nreps), function(i) fitsim(i))
-  
-  pow<-with(fitAll, mean( p < 0.05, na.rm = TRUE))
-  
-  pow
-
-}
+pow <- mean( fitAll[,"p"] < 0.008, na.rm = TRUE)
+pow    
 
 
-pow_simSWRCT(simdat,
-                  nreps = 1200,
-                  p1 = 0.15,
-                  p2 = 0.35,
-                  rho= 0.05)
+
 
