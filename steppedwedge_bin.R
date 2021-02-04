@@ -93,7 +93,7 @@ simdat <- designSWT(n.site = 10,
                     n.seq = 5,
                     n.id = 40,
                     n.period = 36,
-                    step = 5)
+                    t.step = 5)
 
 table(simdat$site,simdat$time)
 table(simdat$site,simdat$period)
