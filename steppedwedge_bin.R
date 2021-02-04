@@ -12,24 +12,25 @@ library(pbapply)  # progress bar for simulations
 
 # using a mixed effects, quick method
 designSWT <-function(n.site ,
-                  n.id ,
-                  min.base, # basleine time for first site
-                  n.period,
-                  step) {    #time between steps, eg every 2 months 
-   
-    expdat <- expand.grid( id = seq(n.id),time = seq(n.period),site =seq(n.site)) 
-    sites <- data.frame(site = seq(n.site),
-                        step = seq(from = (min.base+1),
-                                   to = (n.period-(min.base+step)) ,
-                                   by = step))
+                     n.seq,  #The number of sequeces, a sequence is a collection of sites that step together
+                     n.id ,  # The number of subjects in a site
+                     n.period, # The number of data collection periods
+                     t.step) {     #time between steps, eg every 2 months
+
+    site.per.seq <- n.site/n.seq
+    expdat <- expand.grid( id = seq(n.id),time = seq(n.period),site =seq(n.site) ) 
+    sites <- data.frame(site = rep(seq(n.site),eaech = site.per.seq), step =
+                        rep(seq(from = (t.step+1), 
+                                to = (n.period-1) ,
+                                by = t.step), each = site.per.seq))
+
     df<-merge(expdat,sites,by="site")
-    df$period <- ifelse(df$time <  df$step,0,
-                        ifelse(df$time < (df$step + step), NA, 1 ))  # period is missing during the intervention period and 1 thereafter
+    df$period <- ifelse(df$time <  df$step, 0,
+                        ifelse(df$time == df$step, NA, 1 ))  # period is missing during the intervention period and 1 thereafter
 
     df <- na.exclude(df)
     return(df)
 }
-
 
 simSWRCT <- function(df,
                      nreps ,
@@ -87,14 +88,12 @@ fitsim <- function(i,dat = simdat,out = ss) {
 
 # now the power calculations
 
-# 10 completed surveys per site per week = 40 per site per month,
-# 5 months basline, 5 months intervention
 
-simdat <- designSWT(n.site = 5,
-              n.id = 40,
-              min.base = 5,
-              n.period = 36,
-              step = 5)
+simdat <- designSWT(n.site = 10,
+                    n.seq = 5,
+                    n.id = 40,
+                    n.period = 36,
+                    step = 5)
 
 table(simdat$site,simdat$time)
 table(simdat$site,simdat$period)
